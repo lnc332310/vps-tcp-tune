@@ -8,14 +8,14 @@
 # 1. 正式版本迭代时修改 SCRIPT_VERSION，并更新版本备注（保留最新5条）
 # 2. 临时热修/不发版时只修改 SCRIPT_LAST_UPDATE，用于快速识别脚本是否已更新
 #=============================================================================
+# v5.0.6 更新: 代码质量大扫除：Snell 下载逻辑合并去重+unzip 完整性校验、版本号常量化、删除死代码/死变量、修复 15 处引号分词隐患、Xray 子脚本错误处理加固 (by Eric86777)
 # v5.0.5 更新: 修复 bbr 快捷命令在存在异常 ~/.curlrc/Authorization 配置时可能 curl 401 的问题，别名改用 curl -q (by Eric86777)
 # v5.0.4 更新: Snell 12-4 改为一键修复不通/掉线：补齐旧实例 systemd/端口保留/每日重启兜底并保留核心更新入口 (by Eric86777)
 # v5.0.3 更新: 修复 Xray Reality 密钥对解析兼容性，适配 Private key/Public key 输出格式 (by Eric86777)
 # v5.0.2 更新: 修复 Snell 查看节点配置换 IP 后仍输出旧 IP；修复 Xray 子菜单 warning 调用和默认端口交互；同步 README 功能描述 (by Eric86777)
-# v5.0.1 更新: 修复 XanMod 官方源 releases 为空导致 BBR v3 内核安装找不到 linux-xanmod-x64v3；改为按系统 codename 写源并校验包存在；修复 CF Tunnel 带引号 --config 解析 (by Eric86777)
 
-SCRIPT_VERSION="5.0.5"
-SCRIPT_LAST_UPDATE="修复 bbr 快捷命令 curl 401，别名下载改用 curl -q 忽略本机 curlrc"
+SCRIPT_VERSION="5.0.6"
+SCRIPT_LAST_UPDATE="代码质量大扫除：Snell 下载去重+完整性校验、死代码清理、引号分词修复"
 #=============================================================================
 
 #=============================================================================
@@ -53,15 +53,6 @@ gl_bai='\033[0m'        # 重置
 gl_kjlan='\033[96m'     # 亮青色
 gl_zi='\033[35m'        # 紫色
 gl_hui='\033[90m'       # 灰色
-
-# 英文别名（供新代码使用）
-readonly COLOR_RED="$gl_hong"
-readonly COLOR_GREEN="$gl_lv"
-readonly COLOR_YELLOW="$gl_huang"
-readonly COLOR_RESET="$gl_bai"
-readonly COLOR_CYAN="$gl_kjlan"
-readonly COLOR_PURPLE="$gl_zi"
-readonly COLOR_GRAY="$gl_hui"
 
 # 显示宽度计算（中文占2列，ASCII占1列）
 get_display_width() {
@@ -121,22 +112,6 @@ SYSCTL_CONF="/etc/sysctl.d/99-bbr-ultimate.conf"
 readonly CADDY_DEFAULT_VERSION="2.10.2"
 readonly SNELL_DEFAULT_VERSION="5.0.1"
 
-# IP 查询服务 URL（按优先级排序）
-readonly IP_CHECK_V4_URLS=(
-    "https://api.ipify.org"
-    "https://ip.sb"
-    "https://checkip.amazonaws.com"
-    "https://ipinfo.io/ip"
-)
-readonly IP_CHECK_V6_URLS=(
-    "https://api64.ipify.org"
-    "https://v6.ipinfo.io/ip"
-    "https://ip.sb"
-)
-
-# IP 信息查询
-readonly IP_INFO_URL="https://ipinfo.io"
-
 #=============================================================================
 # 日志系统
 #=============================================================================
@@ -194,26 +169,6 @@ cleanup_temp_files() {
         esac
     done
     rm -f /tmp/caddy.tar.gz 2>/dev/null || true
-}
-
-# 全局错误处理器（可选启用）
-error_handler() {
-    local exit_code=$1
-    local line_no=$2
-    local command="$3"
-
-    log_error "脚本执行失败"
-    log_error "  退出码: $exit_code"
-    log_error "  行号: $line_no"
-    log_error "  命令: $command"
-
-    cleanup_temp_files
-}
-
-# 启用严格模式（用于调试）
-enable_strict_mode() {
-    set -euo pipefail
-    trap 'error_handler $? $LINENO "$BASH_COMMAND"' ERR
 }
 
 # 退出时清理
@@ -597,7 +552,6 @@ manage_swap() {
         echo -e "${gl_huang}提示:${gl_bai} 如需调整 /dev/ swap 分区，请手动执行 swapoff/swap 分区工具。"
 
         local mem_total=$(free -m | awk 'NR==2{print $2}')
-        local swap_used=$(free -m | awk 'NR==3{print $3}')
         local swap_total=$(free -m | awk 'NR==3{print $2}')
         local swap_info=$(free -m | awk 'NR==3{used=$3; total=$2; if (total == 0) {percentage=0} else {percentage=used*100/total}; printf "%dM/%dM (%d%%)", used, total, percentage}')
         
@@ -678,7 +632,7 @@ set_ip_priority() {
 
     # 备份原配置文件并记录原始状态
     if [ -f /etc/gai.conf ]; then
-        cp /etc/gai.conf /etc/gai.conf.bak.$(date +%Y%m%d_%H%M%S)
+        cp /etc/gai.conf "/etc/gai.conf.bak.$(date +%Y%m%d_%H%M%S)"
         echo "已备份原配置文件到 /etc/gai.conf.bak.*"
         # 记录原先存在文件
         echo "existed" > /etc/gai.conf.original_state
@@ -1464,7 +1418,7 @@ detect_bandwidth() {
                         ;;
                 esac
                 
-                cd /tmp
+                cd /tmp && \
                 wget -q "$download_url" -O speedtest.tgz && \
                 tar -xzf speedtest.tgz && \
                 mv speedtest /usr/local/bin/ && \
@@ -1642,7 +1596,7 @@ detect_bandwidth() {
                         ;;
                 esac
                 
-                cd /tmp
+                cd /tmp && \
                 wget -q "$download_url" -O speedtest.tgz && \
                 tar -xzf speedtest.tgz && \
                 mv speedtest /usr/local/bin/ && \
@@ -5784,22 +5738,22 @@ Kernel_optimize() {
         read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1)
-                cd ~
+                cd ~ || true
                 clear
                 optimize_xinchendahai
                 ;;
             2)
-                cd ~
+                cd ~ || true
                 clear
                 optimize_reality_ultimate
                 ;;
             3)
-                cd ~
+                cd ~ || true
                 clear
                 optimize_low_spec
                 ;;
             4)
-                cd ~
+                cd ~ || true
                 clear
                 optimize_xinchendahai_original
                 ;;
@@ -6903,7 +6857,7 @@ update_xanmod_kernel() {
         [Yy])
             echo ""
             echo "正在更新内核..."
-            apt install --only-upgrade -y $(echo "$installed_packages" | tr '\n' ' ')
+            echo "$installed_packages" | xargs -r apt install --only-upgrade -y
             
             if [ $? -eq 0 ]; then
                 echo ""
@@ -7318,7 +7272,7 @@ uninstall_all() {
     
     # 恢复 sysctl.conf 原始配置（如果有备份）
     if [ -f "/etc/sysctl.conf.bak.original" ]; then
-        cp /etc/sysctl.conf /etc/sysctl.conf.bak.$(date +%Y%m%d_%H%M%S) 2>/dev/null
+        cp /etc/sysctl.conf "/etc/sysctl.conf.bak.$(date +%Y%m%d_%H%M%S)" 2>/dev/null
         cp /etc/sysctl.conf.bak.original /etc/sysctl.conf 2>/dev/null
         rm -f /etc/sysctl.conf.bak.original
         sysctl_cleaned=$((sysctl_cleaned + 1))
@@ -7427,18 +7381,22 @@ uninstall_all() {
 
     # 6. 清理其他临时文件和备份
     echo -e "${gl_huang}[6/8] 清理临时文件和备份...${gl_bai}"
-    local temp_files=(
-        "/tmp/socks5_proxy_*.sh"
-        "/root/.realm_backup/"
-    )
-    
     local temp_cleaned=0
-    for pattern in "${temp_files[@]}"; do
-        if ls $pattern > /dev/null 2>&1; then
-            rm -rf $pattern 2>/dev/null
+
+    # 临时文件（glob 展开后逐个删除）
+    local tmp_file
+    for tmp_file in /tmp/socks5_proxy_*.sh; do
+        if [ -f "$tmp_file" ]; then
+            rm -f "$tmp_file" 2>/dev/null
             temp_cleaned=$((temp_cleaned + 1))
         fi
     done
+
+    # 备份目录（显式处理，不走 glob）
+    if [ -d "/root/.realm_backup" ]; then
+        rm -rf "/root/.realm_backup" 2>/dev/null
+        temp_cleaned=$((temp_cleaned + 1))
+    fi
     
     if [ $temp_cleaned -gt 0 ]; then
         echo -e "  ${gl_lv}✅ 已清理临时文件${gl_bai}"
@@ -7591,8 +7549,6 @@ run_kxy_script() {
 SNELL_RED="${gl_hong}"
 SNELL_GREEN="${gl_lv}"
 SNELL_YELLOW="${gl_huang}"
-SNELL_BLUE="${gl_kjlan}"
-SNELL_PURPLE="${gl_zi}"
 SNELL_CYAN="${gl_kjlan}"
 SNELL_RESET="${gl_bai}"
 
@@ -8371,6 +8327,57 @@ show_snell_config_live() {
 }
 
 # 安装 Snell
+# 下载并校验 Snell 二进制（install_snell / update_snell 共用）
+# 成功：stdout 输出解压后的临时目录路径（内含 snell-server），调用方负责用完后 rm -rf
+# 失败：返回 1，临时文件已自行清理
+snell_download_binary() {
+    local arch version snell_url tmp_zip tmp_dir
+    # 用 uname -m 替代 arch(后者在某些精简发行版不存在)
+    arch=$(uname -m)
+    version="v${SNELL_DEFAULT_VERSION}"
+    case "$arch" in
+        aarch64|arm64)
+            snell_url="https://dl.nssurge.com/snell/snell-server-${version}-linux-aarch64.zip"
+            ;;
+        x86_64|amd64)
+            snell_url="https://dl.nssurge.com/snell/snell-server-${version}-linux-amd64.zip"
+            ;;
+        *)
+            echo -e "${SNELL_RED}不支持的架构: ${arch}（仅支持 x86_64 / aarch64）${SNELL_RESET}" >&2
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - 不支持的架构: ${arch}" >> "$SNELL_LOG_FILE"
+            return 1
+            ;;
+    esac
+
+    tmp_zip=$(mktemp /tmp/snell-server.XXXXXX.zip) || return 1
+    tmp_dir=$(mktemp -d /tmp/snell-dl.XXXXXX) || { rm -f "$tmp_zip"; return 1; }
+
+    echo -e "${SNELL_GREEN}正在下载 Snell ${version}...${SNELL_RESET}" >&2
+    if ! wget --timeout=30 --tries=3 -q --show-progress "${snell_url}" -O "$tmp_zip" || [ ! -s "$tmp_zip" ]; then
+        echo -e "${SNELL_RED}下载 Snell 失败。${SNELL_RESET}" >&2
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 下载 Snell 失败" >> "$SNELL_LOG_FILE"
+        rm -f "$tmp_zip"; rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # unzip -t 完整性测试，截断/损坏的压缩包在这里拦下
+    if ! unzip -t "$tmp_zip" >/dev/null 2>&1 || ! unzip -o "$tmp_zip" -d "$tmp_dir" >/dev/null 2>&1; then
+        echo -e "${SNELL_RED}Snell 压缩包损坏或解压失败。${SNELL_RESET}" >&2
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 解压缩 Snell 失败" >> "$SNELL_LOG_FILE"
+        rm -f "$tmp_zip"; rm -rf "$tmp_dir"
+        return 1
+    fi
+    rm -f "$tmp_zip"
+
+    if [ ! -f "${tmp_dir}/snell-server" ]; then
+        echo -e "${SNELL_RED}解压后未找到 snell-server 二进制。${SNELL_RESET}" >&2
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    echo "$tmp_dir"
+}
+
 install_snell() {
     echo -e "${SNELL_GREEN}正在安装 Snell${SNELL_RESET}"
 
@@ -8385,56 +8392,26 @@ install_snell() {
         return 1
     fi
 
-    # 下载 Snell 服务器文件
-    # 修复 Bug 6: 用 uname -m 替代 arch(后者在某些精简发行版不存在),并支持 ARM 全系
-    ARCH=$(uname -m)
-    VERSION="v5.0.1"
-    SNELL_URL=""
     INSTALL_DIR="/usr/local/bin"
     SYSTEMD_SERVICE_FILE="/lib/systemd/system/snell.service"
     CONF_DIR="/etc/snell"
     CONF_FILE="${CONF_DIR}/snell-server.conf"
 
-    case "$ARCH" in
-        aarch64|arm64)
-            SNELL_URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-aarch64.zip"
-            ;;
-        x86_64|amd64)
-            SNELL_URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-amd64.zip"
-            ;;
-        *)
-            echo -e "${SNELL_RED}不支持的架构: ${ARCH}（仅支持 x86_64 / aarch64）${SNELL_RESET}"
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - 不支持的架构: ${ARCH}" >> "$SNELL_LOG_FILE"
-            cleanup_partial_install_snell "${SNELL_PORT:-}"
-            return 1
-            ;;
-    esac
+    # 下载并校验 Snell 二进制（公共函数，与 update_snell 共用）
+    local dl_dir
+    dl_dir=$(snell_download_binary) || {
+        cleanup_partial_install_snell "${SNELL_PORT:-}"
+        return 1
+    }
 
-    # 下载 Snell 服务器文件（修复 Bug: 下载到 /tmp，加超时和重试）
-    wget --timeout=30 --tries=3 -q --show-progress "${SNELL_URL}" -O /tmp/snell-server.zip
-    if [ $? -ne 0 ] || [ ! -s /tmp/snell-server.zip ]; then
-        echo -e "${SNELL_RED}下载 Snell 失败。${SNELL_RESET}"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 下载 Snell 失败" >> "$SNELL_LOG_FILE"
-        rm -f /tmp/snell-server.zip
+    if ! install -m 755 "${dl_dir}/snell-server" "${INSTALL_DIR}/snell-server"; then
+        echo -e "${SNELL_RED}安装 snell-server 到 ${INSTALL_DIR} 失败。${SNELL_RESET}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 安装 snell-server 失败" >> "$SNELL_LOG_FILE"
+        rm -rf "$dl_dir"
         cleanup_partial_install_snell "${SNELL_PORT:-}"
         return 1
     fi
-
-    # 解压缩文件到指定目录
-    unzip -o /tmp/snell-server.zip -d ${INSTALL_DIR}
-    if [ $? -ne 0 ]; then
-        echo -e "${SNELL_RED}解压缩 Snell 失败。${SNELL_RESET}"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 解压缩 Snell 失败" >> "$SNELL_LOG_FILE"
-        rm -f /tmp/snell-server.zip
-        cleanup_partial_install_snell "${SNELL_PORT:-}"
-        return 1
-    fi
-
-    # 删除下载的 zip 文件
-    rm -f /tmp/snell-server.zip
-
-    # 赋予执行权限
-    chmod +x ${INSTALL_DIR}/snell-server
+    rm -rf "$dl_dir"
 
     # 生成随机端口和密码（修复 ①：避开 Linux 默认临时端口起点 32768，降低被抢概率）
     SNELL_PORT=$(shuf -i 10000-29999 -n 1)
@@ -8726,68 +8703,16 @@ update_snell() {
         return 1
     fi
 
-    local ARCH=$(uname -m)
-    local VERSION="v5.0.1"
-    local SNELL_URL=""
-    case "$ARCH" in
-        aarch64|arm64)
-            SNELL_URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-aarch64.zip"
-            ;;
-        x86_64|amd64)
-            SNELL_URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-amd64.zip"
-            ;;
-        *)
-            echo -e "${SNELL_RED}不支持的架构: ${ARCH}${SNELL_RESET}"
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - 不支持的架构: ${ARCH}" >> "$SNELL_LOG_FILE"
-            snell_release_lock
-            return 1
-            ;;
-    esac
-
-    local TMP_ZIP TMP_DIR
-    TMP_ZIP=$(mktemp /tmp/snell-server.XXXXXX.zip) || {
+    # 下载并校验 Snell 二进制（公共函数，与 install_snell 共用）
+    local TMP_DIR
+    TMP_DIR=$(snell_download_binary) || {
         snell_release_lock
         return 1
     }
-    TMP_DIR=$(mktemp -d /tmp/snell-update.XXXXXX) || {
-        rm -f "$TMP_ZIP"
-        snell_release_lock
-        return 1
-    }
-
-    echo -e "${SNELL_GREEN}正在下载 Snell ${VERSION}...${SNELL_RESET}"
-    if ! wget --timeout=30 --tries=3 -q --show-progress "${SNELL_URL}" -O "$TMP_ZIP"; then
-        echo -e "${SNELL_RED}下载 Snell 失败。${SNELL_RESET}"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 下载 Snell 失败" >> "$SNELL_LOG_FILE"
-        rm -f "$TMP_ZIP"; rm -rf "$TMP_DIR"
-        snell_release_lock
-        return 1
-    fi
-
-    if [ ! -s "$TMP_ZIP" ]; then
-        echo -e "${SNELL_RED}下载文件为空或损坏。${SNELL_RESET}"
-        rm -f "$TMP_ZIP"; rm -rf "$TMP_DIR"
-        snell_release_lock
-        return 1
-    fi
-
-    if ! unzip -o "$TMP_ZIP" -d "$TMP_DIR" >/dev/null 2>&1; then
-        echo -e "${SNELL_RED}解压缩 Snell 失败。${SNELL_RESET}"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 解压缩 Snell 失败" >> "$SNELL_LOG_FILE"
-        rm -f "$TMP_ZIP"; rm -rf "$TMP_DIR"
-        snell_release_lock
-        return 1
-    fi
-    if [ ! -f "$TMP_DIR/snell-server" ]; then
-        echo -e "${SNELL_RED}解压后未找到 snell-server 二进制。${SNELL_RESET}"
-        rm -f "$TMP_ZIP"; rm -rf "$TMP_DIR"
-        snell_release_lock
-        return 1
-    fi
 
     if ! cp "${SNELL_BIN}" "${SNELL_BIN}.bak"; then
         echo -e "${SNELL_RED}备份旧 Snell 二进制失败，已取消更新。${SNELL_RESET}"
-        rm -f "$TMP_ZIP"; rm -rf "$TMP_DIR"
+        rm -rf "$TMP_DIR"
         snell_release_lock
         return 1
     fi
@@ -8803,12 +8728,12 @@ update_snell() {
         for svc_name in "${restart_services[@]}"; do
             systemctl start "$svc_name" 2>/dev/null
         done
-        rm -f "$TMP_ZIP"; rm -rf "$TMP_DIR"
+        rm -rf "$TMP_DIR"
         snell_release_lock
         return 1
     fi
     chmod +x "${SNELL_BIN}"
-    rm -f "$TMP_ZIP"; rm -rf "$TMP_DIR"
+    rm -rf "$TMP_DIR"
 
     echo -e "${SNELL_GREEN}正在重启并验证 Snell 服务...${SNELL_RESET}"
     if ! snell_restart_units_with_healthcheck "${restart_services[@]}"; then
@@ -9028,7 +8953,7 @@ snell_menu() {
         if [ -f "/usr/local/bin/snell-server" ]; then
             # 尝试获取版本号（Snell 没有 --version 参数，通过文件修改时间或固定版本号）
             # 这里使用配置中指定的版本号
-            snell_version="v5.0.1"
+            snell_version="v${SNELL_DEFAULT_VERSION}"
         fi
         echo -e "运行版本: ${snell_version}"
         echo ""
@@ -9151,7 +9076,7 @@ is_quiet=false
 
 # --- 辅助函数 ---
 error() { 
-    echo -e "\n$red[✖] $1$none\n" >&2
+    echo -e "\n${red}[✖] $1$none\n" >&2
     
     # 根据错误内容提供简单建议
     case "$1" in
@@ -9164,9 +9089,9 @@ error() {
     esac
 }
 
-info() { [[ "$is_quiet" = false ]] && echo -e "\n$yellow[!] $1$none\n"; }
-success() { [[ "$is_quiet" = false ]] && echo -e "\n$green[✔] $1$none\n"; }
-warning() { [[ "$is_quiet" = false ]] && echo -e "\n$yellow[⚠] $1$none\n"; }
+info() { [[ "$is_quiet" = false ]] && echo -e "\n${yellow}[!] $1$none\n"; }
+success() { [[ "$is_quiet" = false ]] && echo -e "\n${green}[✔] $1$none\n"; }
+warning() { [[ "$is_quiet" = false ]] && echo -e "\n${yellow}[⚠] $1$none\n"; }
 
 spinner() {
     local pid="$1"
@@ -9556,9 +9481,10 @@ show_port_usage() {
     declare -A program_ports
     while read line; do
         if [[ "$line" =~ LISTEN|UNCONN ]]; then
-            local local_addr=$(echo "$line" | awk '{print $5}')
-            local port=$(echo "$local_addr" | grep -o ':[0-9]*$' | cut -d':' -f2)
-            local program=$(echo "$line" | awk '{print $7}' | cut -d'"' -f2 2>/dev/null || echo "")
+            local local_addr port program
+            local_addr=$(echo "$line" | awk '{print $5}')
+            port=$(echo "$local_addr" | grep -o ':[0-9]*$' | cut -d':' -f2) || true
+            program=$(echo "$line" | awk '{print $7}' | cut -d'"' -f2 2>/dev/null || echo "")
 
             if [ -n "$port" ] && [ -n "$program" ] && [ "$program" != "-" ]; then
                 if [ -z "${program_ports[$program]:-}" ]; then
@@ -10561,8 +10487,9 @@ add_socks5_proxy() {
         return
     fi
     
-    local selected_tag=$(echo "$selected_info" | cut -d'|' -f1)
-    local selected_port=$(echo "$selected_info" | cut -d'|' -f2)
+    local selected_tag selected_port
+    selected_tag=$(echo "$selected_info" | cut -d'|' -f1)
+    selected_port=$(echo "$selected_info" | cut -d'|' -f2)
     
     echo ""
     info "已选择节点: ${cyan}${selected_tag}${none} (端口: ${cyan}${selected_port}${none})"
@@ -10832,8 +10759,9 @@ delete_socks5_proxy() {
         return
     fi
     
-    local inbound_tag=$(echo "$selected_info" | cut -d'|' -f1)
-    local outbound_tag=$(echo "$selected_info" | cut -d'|' -f2)
+    local inbound_tag outbound_tag
+    inbound_tag=$(echo "$selected_info" | cut -d'|' -f1)
+    outbound_tag=$(echo "$selected_info" | cut -d'|' -f2)
     
     # 读取配置
     local config
@@ -11328,9 +11256,8 @@ download_china_ip_list() {
 update_china_ipset() {
     echo -e "${gl_kjlan}正在更新 IP 地址库...${gl_bai}"
 
-    # 使用文件锁防止并发执行
+    # 使用文件锁防止并发执行（固定使用 FD 200）
     local lock_file="/var/lock/china-ipset-update.lock"
-    local lock_fd=200
 
     # 尝试获取锁（最多等待30秒）
     exec 200>"$lock_file"
@@ -11340,6 +11267,7 @@ update_china_ipset() {
     fi
 
     # 确保退出时释放锁和清理临时文件
+    # shellcheck disable=SC2064  # 故意立即展开：EXIT 触发时局部变量可能已出作用域
     trap "flock -u 200; rm -f '$lock_file' '$CN_IP_LIST_FILE'" EXIT ERR
 
     # 下载 IP 列表
@@ -11509,7 +11437,8 @@ clear_all_block_rules() {
     echo -e "${gl_huang}正在清空所有封锁规则...${gl_bai}"
 
     # 读取所有已封锁端口
-    local ports=($(get_blocked_ports))
+    local ports=()
+    mapfile -t ports < <(get_blocked_ports)
 
     if [ ${#ports[@]} -eq 0 ]; then
         echo -e "${gl_huang}⚠ 没有需要清空的规则${gl_bai}"
@@ -11550,7 +11479,8 @@ menu_add_port_block() {
     echo ""
 
     # 显示 Xray 端口
-    local xray_ports=($(get_xray_ports))
+    local xray_ports=()
+    mapfile -t xray_ports < <(get_xray_ports)
     if [ ${#xray_ports[@]} -gt 0 ]; then
         echo -e "${gl_zi}检测到 Xray 端口:${gl_bai}"
         for i in "${!xray_ports[@]}"; do
@@ -11818,7 +11748,8 @@ menu_update_ip_database() {
             echo -e "${gl_lv}✅ IP 地址库更新成功${gl_bai}"
 
             # 重新应用所有规则
-            local ports=($(get_blocked_ports))
+            local ports=()
+            mapfile -t ports < <(get_blocked_ports)
             if [ ${#ports[@]} -gt 0 ]; then
                 echo ""
                 echo -e "${gl_kjlan}正在重新应用封锁规则...${gl_bai}"
@@ -11860,7 +11791,8 @@ menu_view_block_logs() {
     echo ""
 
     # 获取已封锁端口
-    local ports=($(get_blocked_ports))
+    local ports=()
+    mapfile -t ports < <(get_blocked_ports)
 
     if [ ${#ports[@]} -eq 0 ]; then
         echo -e "${gl_huang}⚠ 没有已封锁的端口${gl_bai}"
@@ -11962,7 +11894,8 @@ manage_cn_ip_block() {
                 echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
                 echo ""
 
-                local xray_ports=($(get_xray_ports))
+                local xray_ports=()
+                mapfile -t xray_ports < <(get_xray_ports)
                 if [ ${#xray_ports[@]} -eq 0 ]; then
                     echo -e "${gl_huang}⚠ 未检测到 Xray 端口${gl_bai}"
                 else
@@ -13445,7 +13378,8 @@ install_substore_instance() {
     echo ""
     
     # 获取建议的实例编号
-    local instances=($(get_substore_instances))
+    local instances=()
+    read -ra instances <<< "$(get_substore_instances)"
     local suggested_num=1
     if [ ${#instances[@]} -gt 0 ]; then
         echo -e "${gl_huang}已存在 ${#instances[@]} 个实例${gl_bai}"
@@ -14078,7 +14012,8 @@ update_substore_instance() {
     echo "=================================="
     echo ""
     
-    local instances=($(get_substore_instances))
+    local instances=()
+    read -ra instances <<< "$(get_substore_instances)"
     
     if [ ${#instances[@]} -eq 0 ]; then
         echo -e "${gl_huang}没有已部署的实例${gl_bai}"
@@ -14185,7 +14120,8 @@ uninstall_substore_instance() {
     echo "=================================="
     echo ""
     
-    local instances=($(get_substore_instances))
+    local instances=()
+    read -ra instances <<< "$(get_substore_instances)"
     
     if [ ${#instances[@]} -eq 0 ]; then
         echo -e "${gl_huang}没有已部署的实例${gl_bai}"
@@ -14286,7 +14222,8 @@ list_substore_instances() {
     echo "=================================="
     echo ""
     
-    local instances=($(get_substore_instances))
+    local instances=()
+    read -ra instances <<< "$(get_substore_instances)"
     
     if [ ${#instances[@]} -eq 0 ]; then
         echo -e "${gl_huang}没有已部署的实例${gl_bai}"
@@ -14384,7 +14321,6 @@ CF_HOME="/etc/cloudflared"
 CF_CREDENTIALS_DIR="$CF_HOME/credentials"
 CF_CONFIGS_DIR="$CF_HOME/configs"
 CF_CERT_FILE="$CF_HOME/cert.pem"
-CF_MANIFEST_FILE="$CF_HOME/manifest.json"
 CF_MIGRATE_MARKER="$CF_HOME/.migrated"
 CF_LEGACY_HOME="/root/.cloudflared"
 CF_LEGACY_CERT="$CF_LEGACY_HOME/cert.pem"
@@ -16206,7 +16142,8 @@ delete_reverse_proxy() {
         return 0
     fi
 
-    local services_array=($services)
+    local services_array=()
+    mapfile -t services_array <<< "$services"
     local count=0
 
     for service in "${services_array[@]}"; do
@@ -16435,14 +16372,14 @@ ag_proxy_clone_repo() {
 
     if [ -d "$AG_PROXY_INSTALL_DIR" ]; then
         echo -e "${gl_huang}⚠ 项目目录已存在，正在更新...${gl_bai}"
-        cd "$AG_PROXY_INSTALL_DIR"
+        cd "$AG_PROXY_INSTALL_DIR" || return 1
         git pull >/dev/null 2>&1
         if [ $? -eq 0 ]; then
             echo -e "${gl_lv}✅ 代码更新成功${gl_bai}"
             return 0
         else
             echo -e "${gl_hong}❌ 代码更新失败，尝试重新克隆...${gl_bai}"
-            cd /root
+            cd /root || return 1
             rm -rf "$AG_PROXY_INSTALL_DIR"
         fi
     fi
@@ -16473,7 +16410,7 @@ ag_proxy_clone_repo() {
 ag_proxy_install_deps() {
     echo -e "${gl_kjlan}[3/6] 安装项目依赖...${gl_bai}"
 
-    cd "$AG_PROXY_INSTALL_DIR"
+    cd "$AG_PROXY_INSTALL_DIR" || return 1
 
     # 先检查 package.json 是否存在
     if [ ! -f "package.json" ]; then
@@ -16808,7 +16745,7 @@ ag_proxy_update() {
     fi
 
     echo "正在拉取最新代码..."
-    cd "$AG_PROXY_INSTALL_DIR"
+    cd "$AG_PROXY_INSTALL_DIR" || return 1
     git pull
 
     if [ $? -eq 0 ]; then
@@ -18528,7 +18465,6 @@ FUCLAUDE_CONTAINER_NAME="fuclaude"
 FUCLAUDE_IMAGE="pengzhile/fuclaude"
 FUCLAUDE_DEFAULT_PORT="8181"
 FUCLAUDE_PORT_FILE="/etc/fuclaude-port"
-FUCLAUDE_CONFIG_DIR="/etc/fuclaude"
 FUCLAUDE_DATA_DIR="/var/lib/fuclaude"
 
 # 获取当前配置的端口
@@ -18795,9 +18731,6 @@ fuclaude_update() {
     if [ $? -eq 0 ]; then
         echo ""
         echo "正在重启容器..."
-
-        # 获取当前容器的环境变量
-        local old_env=$(docker inspect "$FUCLAUDE_CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null)
 
         # 获取保存的端口
         local port=$(fuclaude_get_port)
@@ -20075,7 +20008,6 @@ CADDY_CONFIG_BACKUP_DIR="/etc/caddy/backups"
 CADDY_DOMAIN_LIST_FILE="/etc/caddy/.domain-list"
 CADDY_SITES_AVAILABLE="/etc/caddy/sites-available"
 CADDY_SITES_ENABLED="/etc/caddy/sites-enabled"
-CADDY_INSTALL_SCRIPT="https://caddyserver.com/api/download?os=linux&arch=amd64"
 
 # 获取服务器 IP
 caddy_get_server_ip() {
@@ -21892,7 +21824,6 @@ openclaw_config_model() {
     local base_url=""
     local provider_name="my-proxy"
     local need_base_url=true
-    local need_api_key=true
     local preset_mode=""  # crs / sub2api-gemini / sub2api-gpt / sub2api-antigravity / 空=手动
 
     case "$api_choice" in
@@ -23905,8 +23836,8 @@ resp_proxy_free_port() {
         local used=0
         ss -tlnp 2>/dev/null | grep -q ":${p} " && used=1
         if [ $used -eq 0 ]; then
-            find "$RESP_PROXY_BASE_DIR" -name 'config.json' 2>/dev/null | \
-                xargs grep -l "\"port\"[[:space:]]*:[[:space:]]*${p}" 2>/dev/null | \
+            find "$RESP_PROXY_BASE_DIR" -name 'config.json' -print0 2>/dev/null | \
+                xargs -0 -r grep -l "\"port\"[[:space:]]*:[[:space:]]*${p}" 2>/dev/null | \
                 grep -q . && used=1
         fi
         [ $used -eq 0 ] && break
@@ -24442,13 +24373,6 @@ resp_proxy_check_status() { echo "not_installed"; }
 resp_proxy_get_port() { echo "$RESP_PROXY_PORT_START"; }
 resp_proxy_get_upstream() { echo ""; }
 
-# 以下是旧版代码占位，保证旧变量引用不报错
-RESP_PROXY_INSTALL_DIR="$RESP_PROXY_BASE_DIR"
-RESP_PROXY_SCRIPT="$RESP_PROXY_BASE_DIR/proxy.mjs"
-RESP_PROXY_CONFIG="$RESP_PROXY_BASE_DIR/config.json"
-RESP_PROXY_SERVICE="openai-resp-proxy"
-RESP_PROXY_DEFAULT_PORT="$RESP_PROXY_PORT_START"
-
 #=============================================================================
 # CLIProxyAPI (CLI转API代理)
 #=============================================================================
@@ -24658,7 +24582,7 @@ CONFIGEOF
     echo ""
     echo -e "${gl_kjlan}[5/5] 启动 CLIProxyAPI 服务...${gl_bai}"
 
-    cd "$CPA_INSTALL_DIR"
+    cd "$CPA_INSTALL_DIR" || return 1
     $compose_cmd up -d
 
     if [ $? -ne 0 ]; then
@@ -24737,7 +24661,7 @@ cpa_update() {
 
     echo ""
     echo "正在重启服务..."
-    cd "$CPA_INSTALL_DIR"
+    cd "$CPA_INSTALL_DIR" || return 1
     $compose_cmd down
     $compose_cmd up -d
 
@@ -25368,6 +25292,9 @@ codex_console_deploy() {
     read -e -p "设置访问密码 [admin123]: " input_password
     if [ -n "$input_password" ]; then
         access_password="$input_password"
+    else
+        echo -e "${gl_hong}⚠️ 警告：当前使用默认弱密码 admin123，公网部署有被爆破风险！${gl_bai}"
+        echo -e "${gl_hong}   强烈建议部署完成后立即通过菜单修改访问密码${gl_bai}"
     fi
 
     # [4/5] 生成 docker-compose 配置
@@ -25407,7 +25334,7 @@ services:
 COMPOSEEOF
 
     # 构建并启动
-    cd "$CODEX_CONSOLE_INSTALL_DIR"
+    cd "$CODEX_CONSOLE_INSTALL_DIR" || return 1
     $compose_cmd build
 
     if [ $? -ne 0 ]; then
